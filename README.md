@@ -10,7 +10,7 @@ The script performs an 8-step API flow that replicates exactly what the Xiaomi r
 2. **Captcha fingerprint** — POST encrypted browser fingerprint to `verify.sec.xiaomi.com/captcha/v2/data`
 3. **Solve reCAPTCHA** — Enterprise reCAPTCHA v2 solved via 2Captcha API
 4. **Captcha verify** — Exchange captcha solution for a `vToken`
-5. **Encrypt credentials** — AES-128-CBC + RSA PKCS1v1.5 encryption of email/password (via `encrypt.cjs`)
+5. **Encrypt credentials** — AES-128-CBC + RSA PKCS1v1.5 encryption of email/password (pure Python)
 6. **Send registration ticket** — POST to `sendEmailRegTicket` with encrypted email + password, `vToken` as cookie
 7. **Read verification code** — Parse 6-digit code from Gmail IMAP (`noreply@notice.xiaomi.com`)
 8. **Verify & create account** — POST to `verifyEmailRegTicket` → account created, session cookies returned
@@ -18,7 +18,6 @@ The script performs an 8-step API flow that replicates exactly what the Xiaomi r
 ## Prerequisites
 
 - **Python 3.10+**
-- **Node.js 18+** (for `encrypt.cjs`)
 - **2Captcha API key** (reCAPTCHA Enterprise solver)
 - **Gmail account** with app password (IMAP access)
 
@@ -31,9 +30,6 @@ cd xiaomi-register
 
 # Install Python deps
 pip install -r requirements.txt
-
-# Install Node deps (for encrypt.cjs)
-npm install crypto-js
 
 # Configure credentials
 cp .env.example .env
@@ -104,6 +100,6 @@ EUI = base64(RSA-PKCS1v1.5(base64(aesKey))) + "." + base64("email,password")
 |------|-------------|
 | `register_v3.py` | Main registration script (single account) |
 | `batch_register.py` | Batch registration with resume support |
-| `encrypt.cjs` | Node.js AES+RSA encryption (Xiaomi EUI format) |
+| `eui_encrypt.py` | Pure Python AES+RSA encryption (Xiaomi EUI format) |
 | `capture/xiaomi/payload_template.json` | Browser fingerprint template |
 | `capture/xiaomi/FLOW.md` | Detailed reverse-engineering notes |
