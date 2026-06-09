@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+*.json
+!capture/xiaomi/payload_template.json
+node_modules/
+*.jsonl
+xiaomi_account.json
