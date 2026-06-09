@@ -36,7 +36,7 @@ cp .env.example .env
 # Edit .env with your actual credentials
 
 # Register a single account
-python register_v3.py
+python xiaomi.py
 ```
 
 ## Batch Registration
@@ -98,7 +98,7 @@ EUI = base64(RSA-PKCS1v1.5(base64(aesKey))) + "." + base64("email,password")
 
 | File | Description |
 |------|-------------|
-| `register_v3.py` | Main registration script (single account) |
+| `xiaomi.py` | Main registration script (single account + public API) |
 | `batch_register.py` | Batch registration with resume support |
 | `eui_encrypt.py` | Pure Python AES+RSA encryption (Xiaomi EUI format) |
 | `capture/xiaomi/payload_template.json` | Browser fingerprint template |
