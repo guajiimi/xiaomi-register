@@ -4,7 +4,6 @@ Xiaomi Account Registration Script v3 — 100% Browserless
 Based on captured browser traffic analysis.
 """
 
-import os
 import json
 import time
 import uuid
@@ -16,17 +15,14 @@ import imaplib
 import email as email_lib
 from urllib.parse import urlencode, quote, parse_qs, urlparse
 
-from dotenv import load_dotenv
-load_dotenv()
-
 from curl_cffi import requests as cffi_requests
 from Crypto.Cipher import AES
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from Crypto.Util.Padding import pad
 
-# ─── CONFIG (from environment) ──────────────────────────────────────────────
-CAPTCHA_API_KEY = os.environ.get("TWOCAPTCHA_API_KEY")
+# ─── CONFIG ──────────────────────────────────────────────────────────────────
+CAPTCHA_API_KEY = "49c0890fbd8c1506c04b58e53752cf2f"
 CAPTCHA_SITE_KEY = "6LeBM0ocAAAAAEwYcFUjtxpVbs-0rnbSVXBBXmh4"
 CAPTCHA_PARAM_K = "8027422fb0eb42fbac1b521ec4a7961f"
 
@@ -55,14 +51,13 @@ AES_IV = b"0102030405060708"
 KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*"
 
 TIMESTAMP = int(time.time())
-EMAIL_PREFIX = os.environ.get("EMAIL_PREFIX")
-EMAIL = f"{EMAIL_PREFIX}+mi{TIMESTAMP}@gmail.com"
-PASSWORD = os.environ.get("DEFAULT_PASSWORD", "ChangeMe123!")
+EMAIL = f"stevenharis78+mi{TIMESTAMP}@gmail.com"
+PASSWORD = "XiaomiGrace2026!"
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
-IMAP_USER = os.environ.get("IMAP_USER")
-IMAP_PASS = os.environ.get("IMAP_PASS")
+IMAP_USER = "stevenharis78@gmail.com"
+IMAP_PASS = "wtkx ntyr fwda plit"
 
 SESSION = cffi_requests.Session(impersonate="chrome124")
 
@@ -98,17 +93,12 @@ def encrypt_captcha_payload(payload: dict) -> tuple:
 
 
 def build_eui(fields: dict) -> tuple:
-    """Build EUI header value using Node.js encrypt.cjs. Returns (eui, encrypted_params)."""
-    import subprocess
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    result = subprocess.run(
-        ["node", os.path.join(script_dir, "encrypt.cjs"), json.dumps(fields)],
-        capture_output=True, text=True, timeout=10
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"encrypt.cjs failed: {result.stderr}")
-    out = json.loads(result.stdout)
-    return out["EUI"], out["encryptedParams"]
+    """Build EUI header value using pure Python. Returns (eui, encrypted_params)."""
+    import sys
+    sys.path.insert(0, "/root/xiaomi-register")
+    from eui_encrypt import encrypt_form_fields
+    result = encrypt_form_fields(fields)
+    return result["EUI"], result["encryptedParams"]
 
 
 # ─── STEP FUNCTIONS ──────────────────────────────────────────────────────────
@@ -127,8 +117,7 @@ def step2_captcha_data():
     print("\n[Step 2] POST captcha/v2/data...")
 
     # Load and refresh payload template
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(script_dir, "capture/xiaomi/payload_template.json")) as f:
+    with open("/root/xiaomi-register/capture/xiaomi/payload_template.json") as f:
         payload = json.load(f)
 
     now_ms = int(time.time() * 1000)
@@ -218,11 +207,11 @@ def step4_recaptcha_verify(e_token: str, g_recaptcha: str) -> str:
     return vtoken
 
 
-def step5_encrypt_email_password(email: str, password: str):
+def step5_encrypt_email_password():
     """Encrypt email+password for EUI. Returns (eui, enc_email, enc_password)."""
     print("\n[Step 5] Encrypting email+password (EUI)...")
 
-    eui, enc_params = build_eui({"email": email, "password": password})
+    eui, enc_params = build_eui({"email": EMAIL, "password": PASSWORD})
     enc_email = enc_params["email"]
     enc_password = enc_params["password"]
 
@@ -231,7 +220,7 @@ def step5_encrypt_email_password(email: str, password: str):
     return eui, enc_email, enc_password
 
 
-def step6_send_email_reg_ticket(vtoken: str, eui: str, enc_email: str, enc_password: str, email: str) -> dict:
+def step6_send_email_reg_ticket(vtoken: str, eui: str, enc_email: str, enc_password: str) -> dict:
     """POST sendEmailRegTicket."""
     print("\n[Step 6] POST sendEmailRegTicket...")
 
@@ -280,10 +269,10 @@ def step6_send_email_reg_ticket(vtoken: str, eui: str, enc_email: str, enc_passw
     return data
 
 
-def step7_read_imap_code(email: str, timeout=120) -> str:
+def step7_read_imap_code(timeout=120) -> str:
     """Read 6-digit verification code from Gmail IMAP."""
     print("\n[Step 7] Reading verification code from IMAP...")
-    print(f"  Waiting for email to {email}...")
+    print(f"  Waiting for email to {EMAIL}...")
 
     deadline = time.time() + timeout
 
@@ -304,7 +293,7 @@ def step7_read_imap_code(email: str, timeout=120) -> str:
 
                 # Check if it's for our exact email
                 to_addr = msg.get("To", "").lower()
-                if email.lower() not in to_addr:
+                if EMAIL.lower() not in to_addr:
                     print(f"    Skipping email to: {to_addr[:50]}")
                     continue
                 print(f"    Matched email to: {to_addr[:50]}")
@@ -344,12 +333,12 @@ def step7_read_imap_code(email: str, timeout=120) -> str:
     raise TimeoutError("Did not receive verification code within timeout")
 
 
-def step8_verify_email_reg_ticket(vtoken: str, code: str, email: str, password: str) -> dict:
+def step8_verify_email_reg_ticket(vtoken: str, code: str) -> dict:
     """POST verifyEmailRegTicket — creates the account."""
     print("\n[Step 8] POST verifyEmailRegTicket (creating account)...")
 
     # Re-encrypt with fresh AES key
-    eui, enc_params = build_eui({"email": email, "password": password})
+    eui, enc_params = build_eui({"email": EMAIL, "password": PASSWORD})
     enc_email = enc_params["email"]
     enc_password = enc_params["password"]
 
@@ -391,51 +380,43 @@ def step8_verify_email_reg_ticket(vtoken: str, code: str, email: str, password: 
     return data
 
 
-def cleanup_imap():
-    """Mark all existing Xiaomi emails as read."""
+# ─── MAIN ────────────────────────────────────────────────────────────────────
+
+def main():
+    print("=" * 60)
+    print("Xiaomi Account Registration v3 — Browserless")
+    print(f"Email: {EMAIL}")
+    print(f"Password: {PASSWORD}")
+    print("=" * 60)
+
+    # Step 1: Warm-up
+    step1_warmup()
+
+    # Pre-cleanup: mark all existing Xiaomi emails as read
     print("\n[Cleanup] Marking old Xiaomi emails as read...")
     try:
         imap = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         imap.login(IMAP_USER, IMAP_PASS)
         imap.select("INBOX")
         _, data = imap.search(None, '(UNSEEN FROM "noreply@notice.xiaomi.com")')
-        if data[0]:
-            for mid in data[0].split():
-                imap.store(mid, "+FLAGS", "\\Seen")
-            print(f"  Marked {len(data[0].split())} old emails as read")
-        else:
-            print("  No old emails to clean up")
+        for mid in data[0].split():
+            imap.store(mid, "+FLAGS", "\\Seen")
+        print(f"  Marked {len(data[0].split()) if data[0] else 0} old emails as read")
         imap.logout()
     except Exception as e:
         print(f"  Cleanup error: {e}")
-
-
-def register_xiaomi_account(email: str, password: str) -> dict:
-    """
-    Full registration flow for a single Xiaomi account.
-    Returns account dict on success, raises on failure.
-    """
-    # Create a fresh session for each account
-    global SESSION
-    SESSION = cffi_requests.Session(impersonate="chrome124")
-
-    print("=" * 60)
-    print("Xiaomi Account Registration v3 — Browserless")
-    print(f"Email: {email}")
-    print("=" * 60)
-
-    # Step 1: Warm-up
-    step1_warmup()
-
-    # Pre-cleanup
-    cleanup_imap()
 
     # Steps 2-4 with retry loop (up to 4 attempts)
     vtoken = None
     for attempt in range(4):
         try:
+            # Step 2: Captcha data
             e_token = step2_captcha_data()
+
+            # Step 3: Solve captcha
             g_recaptcha = step3_solve_captcha(e_token)
+
+            # Step 4: Verify captcha → get vToken
             vtoken = step4_recaptcha_verify(e_token, g_recaptcha)
             break
         except RuntimeError as e:
@@ -447,16 +428,16 @@ def register_xiaomi_account(email: str, password: str) -> dict:
                 raise
 
     # Step 5: Encrypt email+password
-    eui, enc_email, enc_password = step5_encrypt_email_password(email, password)
+    eui, enc_email, enc_password = step5_encrypt_email_password()
 
     # Step 6: Send registration ticket
-    step6_send_email_reg_ticket(vtoken, eui, enc_email, enc_password, email)
+    step6_send_email_reg_ticket(vtoken, eui, enc_email, enc_password)
 
     # Step 7: Read verification code
-    code = step7_read_imap_code(email)
+    code = step7_read_imap_code()
 
     # Step 8: Verify and create account
-    result = step8_verify_email_reg_ticket(vtoken, code, email, password)
+    result = step8_verify_email_reg_ticket(vtoken, code)
 
     # Extract cookies
     cookies = {}
@@ -468,30 +449,20 @@ def register_xiaomi_account(email: str, password: str) -> dict:
     print("\n" + "=" * 60)
     print("ACCOUNT CREATED SUCCESSFULLY!")
     print("=" * 60)
-    print(f"Email:    {email}")
-    print(f"Password: {password}")
+    print(f"Email:    {EMAIL}")
+    print(f"Password: {PASSWORD}")
     print(f"Cookies:  {json.dumps(cookies, indent=2)}")
 
+    # Save to file
     account_data = {
-        "email": email,
-        "password": password,
+        "email": EMAIL,
+        "password": PASSWORD,
         "cookies": cookies,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    return account_data
-
-
-# ─── MAIN ────────────────────────────────────────────────────────────────────
-
-def main():
-    password = os.environ.get("DEFAULT_PASSWORD", "ChangeMe123!")
-    account = register_xiaomi_account(EMAIL, password)
-
-    # Save to file
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(script_dir, "xiaomi_account.json")
+    out_path = "/root/xiaomi-register/xiaomi_account.json"
     with open(out_path, "w") as f:
-        json.dump(account, f, indent=2)
+        json.dump(account_data, f, indent=2)
     print(f"\nSaved to {out_path}")
 
 
