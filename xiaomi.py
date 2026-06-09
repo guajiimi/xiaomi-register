@@ -574,8 +574,8 @@ def register_xiaomi_account(
 def main() -> None:
     load_dotenv()
 
-    email_prefix = os.environ.get("EMAIL_PREFIX", "stevenharis78")
-    default_password = os.environ.get("DEFAULT_PASSWORD", "XiaomiGrace2026!")
+    email_prefix = os.environ.get("EMAIL_PREFIX", "your_email_prefix")
+    default_password = os.environ.get("DEFAULT_PASSWORD", "your_password")
 
     timestamp = int(time.time())
     email = os.environ.get("EMAIL") or f"{email_prefix}+mi{timestamp}@gmail.com"
