@@ -18,6 +18,7 @@ import time
 import hashlib
 import base64
 import random
+import uuid
 import subprocess
 import argparse
 import urllib.parse
@@ -417,14 +418,19 @@ def login_xiaomi(
         }
 
     # ── Captcha required ──
-    if code == 70016:
-        warn("Captcha required (70016)")
+    if code in (70016, 87001):
+        warn(f"Captcha required ({code})")
         v_token = handle_captcha(session, twocaptcha_key)
         if not v_token:
             err("Captcha solving failed")
             return None
 
-        resp = do_login(capt_code=v_token)
+        # vToken goes as COOKIE, not body param
+        session.cookies.set("vToken", v_token, domain="account.xiaomi.com")
+        session.cookies.set("vAction", "register", domain="account.xiaomi.com")
+        session.cookies.set("deviceId", f"wb_{uuid.uuid4()}", domain="account.xiaomi.com")
+
+        resp = do_login()  # captCode stays empty
         try:
             result = _parse_xiaomi(resp.text)
         except json.JSONDecodeError:
