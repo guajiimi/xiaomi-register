@@ -427,10 +427,15 @@ def login_xiaomi(
 
         # vToken goes as COOKIE, not body param
         session.cookies.set("vToken", v_token, domain="account.xiaomi.com")
-        session.cookies.set("vAction", "register", domain="account.xiaomi.com")
+        session.cookies.set("vAction", "login", domain="account.xiaomi.com")
         session.cookies.set("deviceId", f"wb_{uuid.uuid4()}", domain="account.xiaomi.com")
 
+        # Debug: show cookies before retry
+        cookie_names = [c.name for c in session.cookies]
+        info(f"Cookies before retry: {cookie_names}")
+
         resp = do_login()  # captCode stays empty
+        info(f"Login retry status: {resp.status_code}, body: {resp.text[:200]}")
         try:
             result = _parse_xiaomi(resp.text)
         except json.JSONDecodeError:
