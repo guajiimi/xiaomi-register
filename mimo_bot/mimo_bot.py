@@ -84,8 +84,8 @@ CAPTCHA_DATA_TPL = "https://verify.sec.xiaomi.com/captcha/v2/data?k=8027422fb0eb
 CAPTCHA_VERIFY_TPL = "https://verify.sec.xiaomi.com/captcha/v2/recaptcha/verify?k=8027422fb0eb42fbac1b521ec4a7961f&locale=en_US&_t={ts}"
 
 # 2Captcha API
-TWOCAPTCHA_CREATE  = "https://2captcha.com/in.php"
-TWOCAPTCHA_RESULT  = "https://2captcha.com/res.php"
+TWOCAPTCHA_CREATE  = "https://api.2captcha.com/createTask"
+TWOCAPTCHA_RESULT  = "https://api.2captcha.com/getTaskResult"
 
 # MiMo platform
 MIMO_BASE          = "https://platform.xiaomimimo.com"
@@ -93,7 +93,7 @@ MIMO_REFERRAL_BIND = f"{MIMO_BASE}/api/v1/invitation/bind"
 MIMO_ULTRASPEED    = f"{MIMO_BASE}/api/v1/mimo-speed/apply"
 
 # encrypt.cjs for EUI encryption (email field)
-ENCRYPT_CJS = "../scripts/encrypt.cjs"
+ENCRYPT_CJS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "encrypt.cjs")
 
 # Captcha RSA public key (2048-bit) — encrypts AES key for fingerprint payload
 CAPTCHA_RSA_PEM = """-----BEGIN PUBLIC KEY-----
@@ -107,8 +107,6 @@ VwIDAQAB
 -----END PUBLIC KEY-----"""
 
 AES_IV    = b"0102030405060708"
-KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012456789!@#$%^&*"
-# Fix: keep 0 in the charset
 KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*"
 
 
@@ -207,46 +205,40 @@ def solve_captcha(api_key: str, e_token: str, timeout: int = 300) -> Optional[st
         err("TWOCAPTCHA_API_KEY not set")
         return None
 
-    step("Submitting captcha to 2Captcha…")
-    payload = {
-        "key": api_key,
-        "method": "userrecaptcha",
-        "googlekey": CAPTCHA_SITEKEY,
-        "pageurl": "https://account.xiaomi.com/fe/service/login/password",
-        "json": 1,
-        "enterprise": 1,
-        "v": "grecaptcha",
-        "enterprisePayload": json.dumps({"s": e_token}),
+    # createTask POST
+    create_body = {
+        "clientKey": api_key,
+        "task": {
+            "type": "RecaptchaV2EnterpriseTaskProxyless",
+            "websiteURL": "https://account.xiaomi.com/fe/service/login/password",
+            "websiteKey": CAPTCHA_SITEKEY,
+            "enterprisePayload": {"s": e_token}
+        }
     }
-
     try:
-        resp = requests.post(TWOCAPTCHA_CREATE, data=payload, timeout=30, impersonate=IMPERSONATE)
+        resp = requests.post(TWOCAPTCHA_CREATE, json=create_body, timeout=30, impersonate=IMPERSONATE)
         result = resp.json()
-        if result.get("status") != 1:
-            err(f"2Captcha submit failed: {result.get('request', '?')}")
+        if result.get("errorId", 0) != 0:
+            err(f"2Captcha createTask error: {result}")
             return None
 
-        task_id = result["request"]
+        task_id = result["taskId"]
         info(f"Task ID: {task_id}")
 
+        # Poll getTaskResult
         deadline = time.time() + timeout
         while time.time() < deadline:
             time.sleep(10)
-            resp = requests.get(
-                TWOCAPTCHA_RESULT,
-                params={"key": api_key, "action": "get", "id": task_id, "json": 1},
-                timeout=30, impersonate=IMPERSONATE,
-            )
+            poll_body = {"clientKey": api_key, "taskId": task_id}
+            resp = requests.post(TWOCAPTCHA_RESULT, json=poll_body, timeout=30, impersonate=IMPERSONATE)
             result = resp.json()
-            if result.get("status") == 1:
+            if result.get("status") == "ready":
                 ok("Captcha solved")
-                return result["request"]
-            if result.get("request") == "CAPCHA_NOT_READY":
+                return result["solution"]["gRecaptchaResponse"]
+            if result.get("errorId", 0) != 0:
+                err(f"2Captcha error: {result.get('errorDescription', result)}")
+                return None
                 info("Not ready, waiting…")
-                continue
-            err(f"2Captcha error: {result.get('request')}")
-            return None
-
         err("2Captcha timeout")
         return None
     except Exception as e:
@@ -315,12 +307,12 @@ def handle_captcha(session: requests.Session, api_key: str) -> Optional[str]:
             impersonate=IMPERSONATE,
         )
         data = resp.json()
-        v_token = data.get("flag") or data.get("vtoken") or data.get("vToken") or data.get("token")
-        if v_token:
-            ok(f"vToken obtained: {v_token[:30]}…")
-            return v_token
-        err(f"Captcha verify failed: {resp.text[:300]}")
-        return None
+        if data.get("code") != 0 or not data.get("data", {}).get("result"):
+            err(f"Captcha verify failed: {resp.text[:300]}")
+            return None
+        v_token = data["data"]["token"]
+        ok(f"vToken obtained: {v_token[:30]}…")
+        return v_token
     except Exception as e:
         err(f"Captcha verify exception: {e}")
         return None
