@@ -39,7 +39,7 @@ R0nw3cpYF7GZg13QicS/ZwEsSd4HyboAruMxJBPvK3Jdr4ZS23bpN0cavWOJsBqZ
 VwIDAQAB
 -----END PUBLIC KEY-----"""
 
-# EUI RSA key (1024-bit) — from encrypt.cjs
+# EUI RSA key (1024-bit) — from eui_encrypt.py
 EUI_RSA_PEM = """-----BEGIN PUBLIC KEY-----
 MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCYEVrK/4Mahiv0pUJgTybx4J9P
 5dUT/Y0PuwMbk+gMU+jrZnBiXGv6/hCH1avIhoBcE535F8nJQQN3UavZdFkYidso
