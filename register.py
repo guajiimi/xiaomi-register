@@ -101,7 +101,7 @@ def build_eui(fields: dict) -> tuple:
     """Build EUI header value using Node.js encrypt.cjs. Returns (eui, encrypted_params)."""
     import subprocess
     result = subprocess.run(
-        ["node", "/root/xiaomi-register/encrypt.cjs", json.dumps(fields)],
+        ["node", "scripts/encrypt.cjs", json.dumps(fields)],
         capture_output=True, text=True, timeout=10
     )
     if result.returncode != 0:

@@ -93,7 +93,7 @@ MIMO_REFERRAL_BIND = f"{MIMO_BASE}/api/v1/invitation/bind"
 MIMO_ULTRASPEED    = f"{MIMO_BASE}/api/v1/mimo-speed/apply"
 
 # encrypt.cjs for EUI encryption (email field)
-ENCRYPT_CJS = "/root/xiaomi-register/encrypt.cjs"
+ENCRYPT_CJS = "../scripts/encrypt.cjs"
 
 # Captcha RSA public key (2048-bit) — encrypts AES key for fingerprint payload
 CAPTCHA_RSA_PEM = """-----BEGIN PUBLIC KEY-----

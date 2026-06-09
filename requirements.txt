@@ -1,3 +1,0 @@
-curl-cffi
-pycryptodome
-python-dotenv

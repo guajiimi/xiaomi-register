@@ -1,11 +1,9 @@
 .env
 *.pyc
 __pycache__/
-*.json
-!payload_template.json
-!package.json
 node_modules/
-results/
-accounts.txt
+*.json
+!docs/payload_template.json
 xiaomi_account.json
-capture/*.sanitized.json
+accounts.txt
+results/
