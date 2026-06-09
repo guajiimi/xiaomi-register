@@ -57,7 +57,7 @@ KEY_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%
 TIMESTAMP = int(time.time())
 EMAIL_PREFIX = os.environ.get("EMAIL_PREFIX")
 EMAIL = f"{EMAIL_PREFIX}+mi{TIMESTAMP}@gmail.com"
-PASSWORD = "XiaomiGrace2026!"
+PASSWORD = os.environ.get("DEFAULT_PASSWORD", "ChangeMe123!")
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
@@ -484,7 +484,7 @@ def register_xiaomi_account(email: str, password: str) -> dict:
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def main():
-    password = "XiaomiGrace2026!"
+    password = os.environ.get("DEFAULT_PASSWORD", "ChangeMe123!")
     account = register_xiaomi_account(EMAIL, password)
 
     # Save to file
