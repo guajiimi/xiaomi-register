@@ -74,14 +74,19 @@ def _sso_login(session: cffi_requests.Session) -> None:
         params={"currentPath": "/overview"},
         allow_redirects=False,
     )
-    data = resp.json()
-    login_url = data.get("loginUrl") or data.get("data", {}).get("loginUrl", "")
+    login_url = ""
+    # genLoginUrl returns 302 redirect with login URL in Location header
+    if resp.status_code in (301, 302, 307) and resp.headers.get("location"):
+        login_url = resp.headers["location"]
+    else:
+        # Fallback: try JSON response
+        try:
+            data = resp.json()
+            login_url = data.get("loginUrl") or data.get("data", {}).get("loginUrl", "")
+        except Exception:
+            pass
     if not login_url:
-        # Try to extract from redirect
-        if resp.status_code in (301, 302) and resp.headers.get("location"):
-            login_url = resp.headers["location"]
-        else:
-            raise RuntimeError(f"genLoginUrl failed: {data}")
+        raise RuntimeError(f"genLoginUrl failed: status={resp.status_code}")
 
     _info(f"Login URL: {login_url[:80]}...")
 
@@ -115,8 +120,15 @@ def _sso_login(session: cffi_requests.Session) -> None:
         params={"currentPath": "/overview"},
         allow_redirects=False,
     )
-    data = resp.json()
-    login_url2 = data.get("loginUrl") or data.get("data", {}).get("loginUrl", "")
+    login_url2 = ""
+    if resp.status_code in (301, 302, 307) and resp.headers.get("location"):
+        login_url2 = resp.headers["location"]
+    else:
+        try:
+            data = resp.json()
+            login_url2 = data.get("loginUrl") or data.get("data", {}).get("loginUrl", "")
+        except Exception:
+            pass
     if login_url2:
         resp = session.get(login_url2, allow_redirects=False)
         for i in range(max_redirects):
@@ -224,6 +236,7 @@ def bind_referral_after_registration(
     password: str,
     pass_token: str = "",
     c_user_id: str = "",
+    user_id: str = "",
     invite_code: str = "",
     session: Optional[cffi_requests.Session] = None,
 ) -> dict:
@@ -235,6 +248,7 @@ def bind_referral_after_registration(
         password: Account password
         pass_token: passToken cookie from registration (optional if session has it)
         c_user_id: cUserId cookie from registration (optional if session has it)
+        user_id: userId cookie from registration (optional if session has it)
         invite_code: Referral/invitation code to bind
         session: Optional pre-configured session with cookies
 
@@ -255,10 +269,13 @@ def bind_referral_after_registration(
         session = cffi_requests.Session(impersonate="chrome124")
 
     # Set Xiaomi account cookies if provided and not already present
+    # Use .xiaomi.com domain — works for SSO across all subdomains
     if pass_token and not session.cookies.get("passToken"):
-        session.cookies.set("passToken", pass_token, domain="account.xiaomi.com")
+        session.cookies.set("passToken", pass_token, domain=".xiaomi.com")
     if c_user_id and not session.cookies.get("cUserId"):
-        session.cookies.set("cUserId", c_user_id, domain="account.xiaomi.com")
+        session.cookies.set("cUserId", c_user_id, domain=".xiaomi.com")
+    if user_id and not session.cookies.get("userId"):
+        session.cookies.set("userId", user_id, domain=".xiaomi.com")
 
     _banner(f"🎁 {_BOLD}Post-Registration: Referral Bind{_RESET}")
     _info(f"Email: {email}")

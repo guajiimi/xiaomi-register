@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Batch Xiaomi Account Registration
-Registers N accounts using Gmail + alias addressing.
+Registers N accounts using random Indonesian names on custom domains.
 Includes optional referral code binding after each registration.
 """
 
@@ -10,6 +10,7 @@ import sys
 import json
 import time
 import uuid
+import random
 import argparse
 from pathlib import Path
 from datetime import datetime
@@ -30,6 +31,22 @@ FAILED_FILE = _SCRIPT_DIR / "failed.jsonl"
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 DEFAULT_COUNT = 100
 SLEEP_BETWEEN = 10  # seconds
+
+_NAMES = [
+    "agus", "andi", "budi", "dewi", "eni", "fitri", "hani", "indra", "joko", "kurnia",
+    "lukman", "maya", "nina", "omar", "putri", "rahmat", "sari", "tomi", "udin", "vina",
+    "wahyu", "yanti", "zaki", "arif", "bella", "citra", "dian", "eko", "fajar", "gilang",
+    "heri", "irwan", "julia", "kristina", "lina", "maman", "nur", "opi", "putra", "rini",
+    "sinta", "toni", "umar", "vivi", "wawan", "yoga", "zahra", "adit", "beni", "candra",
+    "dimas", "erik", "fikri", "gita", "hendra", "ivan", "jihan", "kevin", "luthfi", "melati",
+    "nanda", "oscar", "panji", "qori", "reza", "syifa", "taufik", "ucok", "vega", "widya",
+    "yusuf", "zul", "adam", "bagas", "cika", "devi", "eka", "febri", "galang", "hadi",
+    "iman", "jaka", "kiki", "lintang", "muhammad", "nova", "okta", "permata", "qila", "rama",
+    "salsa", "tara", "viola", "wira", "yani", "zaskia", "aldi", "bima", "dilla", "farhan",
+    "gina", "hafiz", "irma", "joni", "karina", "lela", "milan", "nia", "olga", "paijo",
+]
+
+_DOMAINS = ["jimixz.tech", "tempmailbase.com", "kanalinfo.net"]
 
 # ─── ANSI HELPERS ─────────────────────────────────────────────────────────────
 _RESET = "\033[0m"
@@ -81,9 +98,12 @@ def _load_failed_emails(filepath: Path) -> set:
     return emails
 
 
-def _generate_email(prefix: str, batch_id: str, seq: int) -> str:
-    """Generate email using Gmail + alias: {prefix}+mi{batch_id}_{seq}@gmail.com"""
-    return f"{prefix}+mi{batch_id}_{seq}@gmail.com"
+def _generate_email(prefix: str = "", batch_id: str = "", seq: int = 0) -> str:
+    """Generate random Indonesian name email: {name}{num}@{domain}"""
+    name = random.choice(_NAMES)
+    num = random.randint(100, 9999)
+    domain = random.choice(_DOMAINS)
+    return f"{name}{num}@{domain}"
 
 
 def main() -> None:
@@ -100,14 +120,11 @@ def main() -> None:
                         help="Referral code to bind (default: from REFERRAL_CODE env)")
     parser.add_argument("--skip-bind", action="store_true",
                         help="Skip referral binding after registration")
+    parser.add_argument("--proxy", type=str, default=None,
+                        help="SOCKS5 proxy for registration (e.g. socks5://localhost:40000)")
     args = parser.parse_args()
 
     # Validate environment
-    email_prefix = os.environ.get("EMAIL_PREFIX")
-    if not email_prefix:
-        print(f"\n {_RED}ERROR: EMAIL_PREFIX not set in .env file{_RESET}")
-        sys.exit(1)
-
     missing = []
     if not os.environ.get("IMAP_USER"):
         missing.append("IMAP_USER")
@@ -134,9 +151,11 @@ def main() -> None:
     print(f"\n{_BOLD}{_CYAN}{_SEP}{_RESET}")
     print(f" 🚀 {_BOLD}Batch Registration — {args.count} accounts{_RESET}")
     print(f"{_BOLD}{_CYAN}{_SEP}{_RESET}")
-    print(f"    {_DIM}Email pattern:{_RESET} {email_prefix}+mi{batch_id}_{{SEQ}}@gmail.com")
+    print(f"    {_DIM}Email pattern:{_RESET} {{random_name}}{{num}}@{{jimixz.tech|tempmailbase.com|kanalinfo.net}}")
     print(f"    {_DIM}Password:{_RESET}      {password}")
     print(f"    {_DIM}Sleep:{_RESET}         {args.sleep}s between registrations")
+    if args.proxy:
+        print(f"    {_DIM}Proxy:{_RESET}         {args.proxy}")
     if referral_code and not args.skip_bind:
         print(f"    {_DIM}Referral:{_RESET}      {referral_code}")
     else:
@@ -152,7 +171,7 @@ def main() -> None:
     start_time = time.time()
 
     for seq in range(1, args.count + 1):
-        email = _generate_email(email_prefix, batch_id, seq)
+        email = _generate_email()
         seq_str = _padded_seq(seq, args.count)
 
         # Resume support: skip already processed emails
@@ -165,7 +184,7 @@ def main() -> None:
 
         reg_start = time.time()
         try:
-            account = register_xiaomi_account(email, password)
+            account = register_xiaomi_account(email, password, proxy=args.proxy)
 
             with open(ACCOUNTS_FILE, "a") as f:
                 f.write(json.dumps(account) + "\n")
@@ -182,6 +201,7 @@ def main() -> None:
                         password=password,
                         pass_token=account.get("passToken", ""),
                         c_user_id=account.get("cUserId", ""),
+                        user_id=account.get("userId", ""),
                         invite_code=referral_code,
                     )
                     if bind_result.get("bound"):

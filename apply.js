@@ -381,6 +381,40 @@ async function mimoLogin(session) {
   throw new Error('SSO login failed — no api-platform_ph cookie');
 }
 
+async function fetchReferralCode(session) {
+  log('REF', '🎁', 'Fetching referral code...');
+  const res = await session.get(`${MIMO_BASE}/api/v1/invitation/code`, {
+    headers: { 'Accept': 'application/json' },
+  });
+  const data = await res.json();
+  if (data.code === 0 || data.invitationCode) {
+    const code = data.invitationCode || data.data?.invitationCode;
+    const reward = data.rewardAmount || data.data?.rewardAmount || 2;
+    const currency = data.currency || data.data?.currency || 'USD';
+    const maxInvite = data.maxInviteeCount || data.data?.maxInviteeCount || 20;
+    success(`Referral code: ${code} | Reward: ${currency === 'CNY' ? '¥' : '$'}${reward} | Max invites: ${maxInvite}`);
+    return { code, reward, currency, maxInvite };
+  }
+  info(`No referral code available: ${JSON.stringify(data)}`);
+  return null;
+}
+
+async function bindReferralCode(session, inviteCode) {
+  log('BIND', '🔗', `Binding referral code: ${inviteCode}...`);
+  const res = await session.post(
+    `${MIMO_BASE}/api/v1/invitation/bind`,
+    JSON.stringify({ inviteCode }),
+    { headers: { 'Content-Type': 'application/json' } },
+  );
+  const data = await res.json();
+  if (data.code === 0) {
+    success('Referral code bound! $2 bonus credited.');
+    return true;
+  }
+  info(`Bind result: ${JSON.stringify(data)}`);
+  return false;
+}
+
 async function applyUltraSpeed(ph, account) {
   log('APPLY', '🚀', 'Applying for UltraSpeed Beta...');
   const session = new Session();
@@ -464,17 +498,38 @@ export async function applyUltraSpeedFull(account) {
   // SSO into MiMo
   const ph = await mimoLogin(session);
 
+  // Fetch referral code
+  const referral = await fetchReferralCode(session);
+
+  // Bind referral code if provided via --ref
+  if (account.referralCode) {
+    await bindReferralCode(session, account.referralCode);
+  }
+
   // Apply for UltraSpeed
   const applyResult = await applyUltraSpeed(ph, { ...account, userId: regResult.userId });
 
   console.log('\n' + '━'.repeat(60));
   console.log(' ✨ Done');
   console.log('━'.repeat(60));
-  console.log(`    Email:     ${email}`);
-  console.log(`    UserId:    ${regResult.userId}`);
+  console.log(`    Email:         ${email}`);
+  console.log(`    UserId:        ${regResult.userId}`);
+  console.log(`    Referral Code: ${referral?.code || 'N/A'}`);
+  console.log(`    Referral URL:  ${MIMO_BASE}?ref=${referral?.code || ''}`);
   console.log('━'.repeat(60));
 
-  return { email, password, userId: regResult.userId, applied: true };
+  return {
+    email,
+    password,
+    userId: regResult.userId,
+    referralCode: referral?.code || null,
+    referralUrl: referral?.code ? `${MIMO_BASE}?ref=${referral.code}` : null,
+    referralReward: referral?.reward || null,
+    referralCurrency: referral?.currency || null,
+    maxInvites: referral?.maxInvite || null,
+    ultraSpeedApplied: true,
+    appliedAt: new Date().toISOString(),
+  };
 }
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
@@ -515,16 +570,19 @@ async function main() {
   // Single mode
   const email = getArg('--email') || process.env.EMAIL || '';
   const password = getArg('--password') || process.env.DEFAULT_PASSWORD || '';
+  const referralCode = getArg('--ref') || process.env.REFERRAL_CODE || '';
 
   if (!email || !password) {
-    console.error('Usage: node apply.js --email X --password Y');
+    console.error('Usage: node apply.js --email X --password Y [--ref CODE]');
     console.error('   or: node apply.js --batch accounts.jsonl');
     console.error('   or: set EMAIL + DEFAULT_PASSWORD in .env');
     process.exit(1);
   }
 
   try {
-    await applyUltraSpeedFull({ email, password });
+    const result = await applyUltraSpeedFull({ email, password, referralCode });
+    console.log('\n📄 JSON Output:');
+    console.log(JSON.stringify(result, null, 2));
   } catch (e) {
     err(`Failed: ${e.message}`);
     process.exit(1);

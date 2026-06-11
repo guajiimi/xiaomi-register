@@ -506,8 +506,12 @@ def _step8_verify_email_reg_ticket(
         _err(f"Verification failed: code={data.get('code')}, desc={data.get('description', 'unknown')}")
         raise RuntimeError(f"verifyEmailRegTicket failed: {data}")
 
-    # Extract userId from response
-    user_id = data.get("data", {}).get("userId", "unknown")
+    # Extract userId from response or cookies (server sets it as cookie)
+    user_id = data.get("data", {}).get("userId", "")
+    if not user_id:
+        user_id = session.cookies.get("userId", "")
+    if not user_id:
+        user_id = "unknown"
     _ok(f"Account created! userId: {user_id}")
     return data
 
@@ -537,6 +541,7 @@ def register_xiaomi_account(
     email: str,
     password: str,
     session: Optional[cffi_requests.Session] = None,
+    proxy: Optional[str] = None,
 ) -> dict:
     """
     Register a Xiaomi account end-to-end.
@@ -545,6 +550,7 @@ def register_xiaomi_account(
         email: Full email address for the account
         password: Password for the account
         session: Optional pre-configured session (creates fresh one if None)
+        proxy: Optional SOCKS5/HTTP proxy (e.g. "socks5://localhost:40000")
 
     Returns:
         dict with keys: email, password, userId, passToken, cUserId, created_at
@@ -570,10 +576,13 @@ def register_xiaomi_account(
     if missing:
         raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
-    # Create fresh session if none provided
+    # Create fresh session if none provided (with optional proxy for registration)
     own_session = session is None
     if own_session:
-        session = cffi_requests.Session(impersonate="chrome124")
+        session_kwargs = {"impersonate": "chrome124"}
+        if proxy:
+            session_kwargs["proxies"] = {"https": proxy, "http": proxy}
+        session = cffi_requests.Session(**session_kwargs)
 
     email_masked = _mask_email(email)
 
@@ -619,10 +628,10 @@ def register_xiaomi_account(
         # Step 8: Verify and create account
         result = _step8_verify_email_reg_ticket(session, vtoken, code, email, password)
 
-        # Extract cookies
-        user_id = result.get("data", {}).get("userId", "")
-        pass_token = session.cookies.get("passToken", domain="account.xiaomi.com") or session.cookies.get("passToken", "")
-        c_user_id = session.cookies.get("cUserId", domain="account.xiaomi.com") or session.cookies.get("cUserId", "")
+        # Extract cookies — userId from response OR cookies (server sets it as cookie)
+        user_id = result.get("data", {}).get("userId", "") or session.cookies.get("userId", "")
+        pass_token = session.cookies.get("passToken", domain=".xiaomi.com") or session.cookies.get("passToken", domain=".account.xiaomi.com") or session.cookies.get("passToken", "")
+        c_user_id = session.cookies.get("cUserId", domain=".xiaomi.com") or session.cookies.get("cUserId", domain=".account.xiaomi.com") or session.cookies.get("cUserId", "")
 
         account = {
             "email": email,
