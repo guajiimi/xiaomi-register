@@ -2,6 +2,7 @@
 """
 Batch Xiaomi Account Registration
 Registers N accounts using Gmail + alias addressing.
+Includes optional referral code binding after each registration.
 """
 
 import os
@@ -17,6 +18,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from xiaomi import register_xiaomi_account
+from mimo_bind import bind_referral_after_registration
 
 __all__ = ["main"]
 
@@ -94,6 +96,10 @@ def main() -> None:
                         help="Password for all accounts (default: auto-generated)")
     parser.add_argument("--sleep", type=int, default=SLEEP_BETWEEN,
                         help=f"Seconds between registrations (default: {SLEEP_BETWEEN})")
+    parser.add_argument("--referral-code", type=str, default=None,
+                        help="Referral code to bind (default: from REFERRAL_CODE env)")
+    parser.add_argument("--skip-bind", action="store_true",
+                        help="Skip referral binding after registration")
     args = parser.parse_args()
 
     # Validate environment
@@ -107,8 +113,9 @@ def main() -> None:
         missing.append("IMAP_USER")
     if not os.environ.get("IMAP_PASS"):
         missing.append("IMAP_PASS")
-    if not os.environ.get("TWOCAPTCHA_API_KEY"):
-        missing.append("TWOCAPTCHA_API_KEY")
+    # Need at least one captcha solver key
+    if not os.environ.get("CAPSOLVER_API_KEY") and not os.environ.get("TWOCAPTCHA_API_KEY"):
+        missing.append("CAPSOLVER_API_KEY or TWOCAPTCHA_API_KEY")
     if missing:
         print(f"\n {_RED}ERROR: Missing environment variables: {', '.join(missing)}{_RESET}")
         print(f" {_DIM}Please fill in your .env file (cp .env.example .env){_RESET}")
@@ -116,6 +123,7 @@ def main() -> None:
 
     batch_id = args.batch_id or uuid.uuid4().hex[:8]
     password = args.password or os.environ.get("DEFAULT_PASSWORD", f"Xiaomi_{uuid.uuid4().hex[:8]}!")
+    referral_code = args.referral_code or os.environ.get("REFERRAL_CODE", "")
 
     # Load existing accounts for resume support
     existing_emails = _load_existing_emails(ACCOUNTS_FILE)
@@ -129,6 +137,10 @@ def main() -> None:
     print(f"    {_DIM}Email pattern:{_RESET} {email_prefix}+mi{batch_id}_{{SEQ}}@gmail.com")
     print(f"    {_DIM}Password:{_RESET}      {password}")
     print(f"    {_DIM}Sleep:{_RESET}         {args.sleep}s between registrations")
+    if referral_code and not args.skip_bind:
+        print(f"    {_DIM}Referral:{_RESET}      {referral_code}")
+    else:
+        print(f"    {_DIM}Referral:{_RESET}      {_YELLOW}disabled{_RESET}")
     if existing_emails:
         print(f"    {_DIM}Resume:{_RESET}        {len(existing_emails)} existing accounts will be skipped")
     print(f"{_BOLD}{_CYAN}{_SEP}{_RESET}\n")
@@ -136,6 +148,7 @@ def main() -> None:
     success_count = 0
     fail_count = 0
     skip_count = 0
+    bind_count = 0
     start_time = time.time()
 
     for seq in range(1, args.count + 1):
@@ -159,7 +172,25 @@ def main() -> None:
 
             elapsed = time.time() - reg_start
             success_count += 1
-            print(f" [{seq_str}/{args.count}] {_GREEN}✅ {_BOLD}{email}{_RESET}{_GREEN} — done ({elapsed:.1f}s){_RESET}")
+            print(f" [{seq_str}/{args.count}] {_GREEN}✅ {_BOLD}{email}{_RESET}{_GREEN} — registered ({elapsed:.1f}s){_RESET}")
+
+            # ─── Referral Bind ──────────────────────────────────────────────
+            if referral_code and not args.skip_bind:
+                try:
+                    bind_result = bind_referral_after_registration(
+                        email=email,
+                        password=password,
+                        pass_token=account.get("passToken", ""),
+                        c_user_id=account.get("cUserId", ""),
+                        invite_code=referral_code,
+                    )
+                    if bind_result.get("bound"):
+                        bind_count += 1
+                        print(f" [{seq_str}/{args.count}] {_GREEN}🎁 {_BOLD}{email}{_RESET}{_GREEN} — referral bound{_RESET}")
+                    else:
+                        print(f" [{seq_str}/{args.count}] {_YELLOW}⚠️  {_BOLD}{email}{_RESET}{_YELLOW} — referral bind failed{_RESET}")
+                except Exception as e:
+                    print(f" [{seq_str}/{args.count}] {_YELLOW}⚠️  {_BOLD}{email}{_RESET}{_YELLOW} — bind error: {str(e)[:50]}{_RESET}")
 
         except Exception as e:
             fail_count += 1
@@ -193,6 +224,8 @@ def main() -> None:
     print(f"    {_GREEN}✅ Success:{_RESET} {success_count}")
     print(f"    {_RED}❌ Failed:{_RESET}  {fail_count}")
     print(f"    {_YELLOW}⏭  Skipped:{_RESET} {skip_count}")
+    if referral_code and not args.skip_bind:
+        print(f"    {_GREEN}🎁 Bound:{_RESET}   {bind_count}")
     print(f"    {_DIM}⏱  Time:{_RESET}    {elapsed_min:.1f} minutes")
     print(f"    {_DIM}📁 Accounts:{_RESET} {ACCOUNTS_FILE}")
     print(f"    {_DIM}📁 Failures:{_RESET} {FAILED_FILE}")

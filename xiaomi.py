@@ -136,6 +136,99 @@ def _mask_email(email: str) -> str:
     return "***@" + domain
 
 
+# ─── CAPTCHA SOLVER HELPERS ───────────────────────────────────────────────────
+
+def _solve_capsolver(session: cffi_requests.Session, e_token: str, capsolver_key: str) -> str:
+    """Solve reCAPTCHA Enterprise via CapSolver. Returns gRecaptchaResponse."""
+    _info("Trying CapSolver...")
+
+    # Check balance
+    resp = session.post("https://api.capsolver.com/getBalance", json={"clientKey": capsolver_key})
+    bal = resp.json()
+    if bal.get("errorId", 0) != 0:
+        raise RuntimeError(f"CapSolver balance check failed: {bal}")
+    _info(f"CapSolver balance: ${bal.get('balance', '?')}")
+
+    create_body = {
+        "clientKey": capsolver_key,
+        "task": {
+            "type": "ReCaptchaV2EnterpriseTaskProxyLess",
+            "websiteURL": REGISTER_URL,
+            "websiteKey": CAPTCHA_SITE_KEY,
+            "enterprisePayload": {"s": e_token},
+        },
+    }
+    resp = session.post("https://api.capsolver.com/createTask", json=create_body)
+    result = resp.json()
+
+    if result.get("errorId", 0) != 0:
+        _err(f"CapSolver createTask error: {result.get('errorDescription', result)}")
+        raise RuntimeError(f"CapSolver createTask error: {result}")
+
+    task_id = result["taskId"]
+    _info(f"CapSolver task #{task_id} submitted")
+
+    for attempt in range(60):
+        time.sleep(3)
+        poll_body = {"clientKey": capsolver_key, "taskId": task_id}
+        resp = session.post("https://api.capsolver.com/getTaskResult", json=poll_body)
+        result = resp.json()
+        _info(f"CapSolver polling... (attempt {attempt + 1}/60)")
+
+        if result.get("status") == "ready":
+            g_recaptcha = result["solution"]["gRecaptchaResponse"]
+            _ok("CapSolver solved ✓")
+            return g_recaptcha
+        elif result.get("errorId", 0) != 0:
+            err_code = result.get("errorDescription", result.get("errorId"))
+            _err(f"CapSolver: {err_code}")
+            raise RuntimeError(f"CapSolver error: {result}")
+
+    raise TimeoutError("CapSolver timed out after 300s")
+
+
+def _solve_2captcha(session: cffi_requests.Session, e_token: str, twocaptcha_key: str) -> str:
+    """Solve reCAPTCHA Enterprise via 2Captcha. Returns gRecaptchaResponse."""
+    _info("Falling back to 2Captcha...")
+
+    create_body = {
+        "clientKey": twocaptcha_key,
+        "task": {
+            "type": "RecaptchaV2EnterpriseTaskProxyless",
+            "websiteURL": REGISTER_URL,
+            "websiteKey": CAPTCHA_SITE_KEY,
+            "enterprisePayload": {"s": e_token},
+        },
+    }
+    resp = session.post("https://api.2captcha.com/createTask", json=create_body)
+    result = resp.json()
+
+    if result.get("errorId", 0) != 0:
+        _err(f"2Captcha createTask error: {result.get('errorDescription', result)}")
+        raise RuntimeError(f"2Captcha createTask error: {result}")
+
+    task_id = result["taskId"]
+    _info(f"2Captcha task #{task_id} submitted")
+
+    for attempt in range(60):
+        time.sleep(5)
+        poll_body = {"clientKey": twocaptcha_key, "taskId": task_id}
+        resp = session.post("https://api.2captcha.com/getTaskResult", json=poll_body)
+        result = resp.json()
+        _info(f"2Captcha polling... (attempt {attempt + 1}/60)")
+
+        if result.get("status") == "ready":
+            g_recaptcha = result["solution"]["gRecaptchaResponse"]
+            _ok("2Captcha solved ✓")
+            return g_recaptcha
+        elif result.get("errorId", 0) != 0:
+            err_code = result.get("errorDescription", result.get("errorId"))
+            _err(f"2Captcha: {err_code}")
+            raise RuntimeError(f"2Captcha error: {result}")
+
+    raise TimeoutError("2Captcha timed out after 300s")
+
+
 # ─── STEP FUNCTIONS ───────────────────────────────────────────────────────────
 
 def _step1_warmup(session: cffi_requests.Session) -> None:
@@ -179,46 +272,34 @@ def _step2_captcha_data(session: cffi_requests.Session) -> str:
     return e_token
 
 
-def _step3_solve_captcha(session: cffi_requests.Session, e_token: str, captcha_api_key: str) -> str:
-    """Solve reCAPTCHA Enterprise via 2Captcha v2 API. Returns gRecaptchaResponse."""
+def _step3_solve_captcha(
+    session: cffi_requests.Session,
+    e_token: str,
+    capsolver_key: str = "",
+    twocaptcha_key: str = "",
+) -> str:
+    """Solve reCAPTCHA Enterprise. CapSolver primary, 2Captcha fallback. Returns gRecaptchaResponse."""
     _step(3, "🧩", "Solving reCAPTCHA Enterprise...")
 
-    create_body = {
-        "clientKey": captcha_api_key,
-        "task": {
-            "type": "RecaptchaV2EnterpriseTaskProxyless",
-            "websiteURL": REGISTER_URL,
-            "websiteKey": CAPTCHA_SITE_KEY,
-            "enterprisePayload": {"s": e_token},
-        },
-    }
-    resp = session.post("https://api.2captcha.com/createTask", json=create_body)
-    result = resp.json()
+    errors = []
 
-    if result.get("errorId", 0) != 0:
-        _err(f"createTask error: {result.get('errorDescription', result)}")
-        raise RuntimeError(f"2Captcha createTask error: {result}")
+    # Try CapSolver first
+    if capsolver_key:
+        try:
+            return _solve_capsolver(session, e_token, capsolver_key)
+        except (RuntimeError, TimeoutError) as e:
+            _warn(f"CapSolver failed: {e}")
+            errors.append(f"CapSolver: {e}")
 
-    task_id = result["taskId"]
-    _info(f"Task #{task_id} submitted")
+    # Fallback to 2Captcha
+    if twocaptcha_key:
+        try:
+            return _solve_2captcha(session, e_token, twocaptcha_key)
+        except (RuntimeError, TimeoutError) as e:
+            _warn(f"2Captcha failed: {e}")
+            errors.append(f"2Captcha: {e}")
 
-    for attempt in range(60):
-        time.sleep(5)
-        poll_body = {"clientKey": captcha_api_key, "taskId": task_id}
-        resp = session.post("https://api.2captcha.com/getTaskResult", json=poll_body)
-        result = resp.json()
-        _info(f"Polling... (attempt {attempt + 1}/60)")
-
-        if result.get("status") == "ready":
-            g_recaptcha = result["solution"]["gRecaptchaResponse"]
-            _ok(f"Solved ✓")
-            return g_recaptcha
-        elif result.get("errorId", 0) != 0:
-            err_code = result.get("errorDescription", result.get("errorId"))
-            _err(f"{err_code}")
-            raise RuntimeError(f"2Captcha error: {result}")
-
-    raise TimeoutError("2Captcha timed out after 300s")
+    raise RuntimeError(f"All captcha solvers failed: {'; '.join(errors)}")
 
 
 def _step4_recaptcha_verify(session: cffi_requests.Session, e_token: str, g_recaptcha: str) -> str:
@@ -474,13 +555,14 @@ def register_xiaomi_account(
     """
     load_dotenv()
 
-    captcha_api_key = os.environ.get("TWOCAPTCHA_API_KEY")
+    capsolver_key = os.environ.get("CAPSOLVER_API_KEY", "")
+    twocaptcha_key = os.environ.get("TWOCAPTCHA_API_KEY", "")
     imap_user = os.environ.get("IMAP_USER")
     imap_pass = os.environ.get("IMAP_PASS")
 
+    if not capsolver_key and not twocaptcha_key:
+        raise ValueError("Missing environment variables: CAPSOLVER_API_KEY or TWOCAPTCHA_API_KEY (at least one required)")
     missing = []
-    if not captcha_api_key:
-        missing.append("TWOCAPTCHA_API_KEY")
     if not imap_user:
         missing.append("IMAP_USER")
     if not imap_pass:
@@ -511,7 +593,7 @@ def register_xiaomi_account(
         for attempt in range(max_attempts):
             try:
                 e_token = _step2_captcha_data(session)
-                g_recaptcha = _step3_solve_captcha(session, e_token, captcha_api_key)
+                g_recaptcha = _step3_solve_captcha(session, e_token, capsolver_key, twocaptcha_key)
                 vtoken = _step4_recaptcha_verify(session, e_token, g_recaptcha)
                 break
             except RuntimeError as e:
